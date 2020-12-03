@@ -1,0 +1,21 @@
+Logger:
+  Level: DEBUG
+  FileName: fetch2.log
+
+Server:
+  Port: 2121
+  Timeout: 2
+  List:
+    - 192.168.43.150
+    - 192.168.43.11
+
+Fetch:
+  ReadPath: /
+  StorePath: /Users/lch/myftp
+
+
+Account:
+  UserName: demo
+  Password: demo
+
+

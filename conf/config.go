@@ -38,9 +38,9 @@ func (c *Config) initConfig() error {
 
 func initLog() error {
 	formatter := &logrus.TextFormatter{
-		FullTimestamp: true,
+		TimestampFormat:"2006-01-02 15:04:05",
+		ForceQuote:true,
 	}
-	logrus.SetFormatter(formatter)
 
 	if level := viper.GetString("Logger.Level"); level != "" {
 		lvl, err := logrus.ParseLevel(level)
@@ -56,7 +56,9 @@ func initLog() error {
 		}
 		logrus.SetOutput(fs)
 	} else {
-		logrus.SetOutput(os.Stdout)
+		formatter.ForceColors =true
+
 	}
+	logrus.SetFormatter(formatter)
 	return nil
 }

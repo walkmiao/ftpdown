@@ -3,33 +3,36 @@ package utils
 import (
 	"fmt"
 	"github.com/jlaffaye/ftp"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"os"
 )
 
-func Mkdir(name string) error {
-	if _, err := os.Stat(name); err != nil {
-		if err := os.MkdirAll(name, os.ModePerm); err != nil {
-			fmt.Printf("make dir %s fail:%v\n", name, err)
+func(s *ServerInfo) Mkdir(dir string) error {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		s.Infof("dir %s is not exist,make dir!\n", dir)
+		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
 			return err
 		}
+		s.Infof("make dir %s success!\n",dir)
 	}
-	fmt.Printf("make dir %s success!\n", name)
 	return nil
 }
 
-func FromRespToFile(resp *ftp.Response, dstPath string) {
-	defer resp.Close()
-	fs, err := os.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.ModePerm)
+func (s *ServerInfo)WriteRespToFile(resp *ftp.Response, path string)error{
+	fs, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.ModePerm)
+
 	if err != nil {
-		log.Errorf("open file error:%v\n", err)
-		return
+		return err
 	}
 	defer fs.Close()
 	_, err = io.Copy(fs, resp)
 	if err != nil {
-		log.Errorf("io copy error:%v\n", err)
-		return
+		return err
 	}
+
+	if err:=resp.Close();err!=nil{
+		return fmt.Errorf("resp close error:%v\n",err)
+	}
+	s.Infof("write file %s end!\n",path)
+	return nil
 }

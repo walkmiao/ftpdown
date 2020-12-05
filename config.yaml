@@ -1,17 +1,18 @@
 Logger:
   Level: DEBUG
-  FileName: fetch2.log
+  FileName:
 
 Server:
-  Port: 2121
+  Port: 62222
   Timeout: 2
   List:
-    - 192.168.43.150
-    - 192.168.43.11
-
+    - 192.168.1.3
+    - 192.168.1.4
+    - 192.168.1.5
 Fetch:
-  ReadPath: /
+  ServerPath: /
   StorePath: /Users/lch/myftp
+  Regexp: .*(exe)$
 
 
 Account:

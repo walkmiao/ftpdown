@@ -4,17 +4,19 @@ import (
 	"context"
 	"ftpHelper/conf"
 	"ftpHelper/utils"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"log"
 	"path"
 	"runtime"
+	"time"
 )
 
 var (
 	maxWorkers = runtime.GOMAXPROCS(0) * 2
 	//设置为cpu的核数*2
 	sema = semaphore.NewWeighted(int64(maxWorkers))
-	ctx  = context.Background()
+	ctx,_  = context.WithTimeout(context.Background(),time.Second*5)
 )
 
 func main() {
@@ -22,25 +24,26 @@ func main() {
 		log.Printf("init config error:%v\n", err)
 		return
 	}
-	log.Printf("max workers:%d\n", maxWorkers)
-
 	for _, addr := range utils.DefaultCommonInfo.ServerList {
 		svrInfo := utils.NewServerInfo(addr)
 		svrInfo.CommonInfo = utils.DefaultCommonInfo
-		svrInfo.SinglePath = path.Join(svrInfo.StorePath, addr)
-		log.Println(svrInfo.SinglePath)
+		svrInfo.TargetPath = path.Join(svrInfo.StorePath, addr)
+		svrInfo.PreviousDir = svrInfo.TargetPath
+		svrInfo.Debugf("target store path:%s",svrInfo.TargetPath)
 		if err := sema.Acquire(ctx, 1); err != nil {
 			break
 		}
 		go func() {
-			defer sema.Release(1)
-			svrInfo.Work()
+			if err:=svrInfo.Work();err!=nil{
+				svrInfo.Errorf("download from server error:%v\n",err)
+			}
+			sema.Release(1)
 		}()
 	}
 
 	if err := sema.Acquire(ctx, int64(maxWorkers)); err != nil {
-		log.Printf("all work exec failed:%v\n", err)
+		logrus.Errorf("work  do  failed:%v\n", err)
 		return
 	}
-	log.Println("work all success")
+	logrus.Info(" All work done!")
 }

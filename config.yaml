@@ -10,6 +10,7 @@ Server:
     - 192.168.1.4
     - 192.168.1.5
 Fetch:
+  Timeout: 10
   ServerPath: /
   StorePath: /Users/lch/myftp
   Regexp: .*(exe)$

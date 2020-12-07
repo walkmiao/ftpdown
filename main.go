@@ -5,6 +5,7 @@ import (
 	"ftpHelper/conf"
 	"ftpHelper/utils"
 	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/semaphore"
 	"log"
 	"path"
@@ -16,7 +17,6 @@ var (
 	maxWorkers = runtime.GOMAXPROCS(0) * 2
 	//设置为cpu的核数*2
 	sema = semaphore.NewWeighted(int64(maxWorkers))
-	ctx,_  = context.WithTimeout(context.Background(),time.Second*5)
 )
 
 func main() {
@@ -24,6 +24,8 @@ func main() {
 		log.Printf("init config error:%v\n", err)
 		return
 	}
+	ctx,_  := context.WithTimeout(context.Background(),
+		time.Second*time.Duration(viper.GetInt("Fetch.Timeout")))
 	for _, addr := range utils.DefaultCommonInfo.ServerList {
 		svrInfo := utils.NewServerInfo(addr)
 		svrInfo.CommonInfo = utils.DefaultCommonInfo
@@ -38,6 +40,7 @@ func main() {
 				svrInfo.Errorf("download from server error:%v\n",err)
 			}
 			sema.Release(1)
+			logrus.Debugf("%s released!\n",svrInfo.Addr)
 		}()
 	}
 

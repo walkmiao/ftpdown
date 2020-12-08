@@ -16,6 +16,7 @@ import (
 type ServerInfo struct {
 	Addr,TargetPath string
 	PreviousDir string
+	FileCount int
 	*CommonInfo
 	*ftp.ServerConn
 	*log.Entry
@@ -88,7 +89,7 @@ func (s *ServerInfo) WalkAndBuild()error {
 	if err:=s.HandleWalker(walker);err!=nil{
 		return fmt.Errorf("handle walker error:%v\n",err)
 	}
-	s.Info("success download from server!")
+	s.Infof("success download from server! file count:%d\n",s.FileCount)
 	return s.ServerConn.Quit()
 }
 
@@ -103,6 +104,7 @@ func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
 	//	}
 
 	case ftp.EntryTypeFile:
+		s.FileCount++
 		if s.IsFilter{
 			if regex.Filter(s.CommonInfo.Regexp,entry.Name){
 				s.Warningf("file %s has been filtered!",entry.Name)

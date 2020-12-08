@@ -24,6 +24,8 @@ var (
 )
 
 func main() {
+	log.Println("process start")
+	start:=time.Now()
 	if err := conf.InitConfig(""); err != nil {
 		log.Printf("init config error:%v\n", err)
 		return
@@ -58,6 +60,7 @@ func main() {
 	}(wg)
 	wg.Wait()
 	logrus.Info(" All work done!")
+	log.Printf("process completed! cost:%f s",time.Now().Sub(start).Seconds())
 	pause()
 }
 

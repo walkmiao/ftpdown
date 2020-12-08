@@ -5,6 +5,9 @@ TARGET = fetch
 
 build : build-windows32
 
+build-self : main.go config.yaml
+	$(GOBUILD)  -o $(TARGET)  main.go
+
 build-linux : main.go config.yaml
 	GOOS=linux GOARCH=amd64 GO111MODULE=on $(GOBUILD)  -o $(TARGET)  main.go
 

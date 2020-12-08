@@ -33,6 +33,6 @@ func (s *ServerInfo)WriteRespToFile(resp *ftp.Response, path string)error{
 	if err:=resp.Close();err!=nil{
 		return fmt.Errorf("resp close error:%v\n",err)
 	}
-	s.Infof("write file %s end!\n",path)
+	s.Debugf("write file %s end!\n",path)
 	return nil
 }

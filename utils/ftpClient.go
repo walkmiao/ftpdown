@@ -28,7 +28,7 @@ type CommonInfo struct {
 	Regexp                string
 	IsFilter			  bool
 	timeout               time.Duration
-	ServerList            []string
+	JDServer,WGQServer           []string
 
 }
 
@@ -46,18 +46,22 @@ func init() {
 	DefaultCommonInfo.timeout = time.Second * time.Duration(viper.GetInt("Server.Timeout"))
 	DefaultCommonInfo.username,DefaultCommonInfo.password=viper.GetString("Account.UserName"),
 		viper.GetString("Account.Password")
-	DefaultCommonInfo.ServerList = viper.GetStringSlice("Server.List")
+	DefaultCommonInfo.JDServer,DefaultCommonInfo.WGQServer =
+		viper.GetStringSlice("Server.List.JD"),viper.GetStringSlice("Server.List.WGQ")
+
 	DefaultCommonInfo.ServerPath, DefaultCommonInfo.StorePath =
 		viper.GetString("Fetch.ServerPath"), viper.GetString("Fetch.StorePath")
 	DefaultCommonInfo.Regexp = viper.GetString("Fetch.Regexp")
 	DefaultCommonInfo.IsFilter = DefaultCommonInfo.Regexp!=""
 }
 
-func NewServerInfo(addr string) *ServerInfo {
+func NewServerInfo(addr string,region string) *ServerInfo {
 	return &ServerInfo{Addr: addr,Entry:log.WithFields(log.Fields{
 		"server":addr,
+		"region":region,
 		"isFilterOpen":DefaultCommonInfo.IsFilter,
 		"regexp":DefaultCommonInfo.Regexp,
+
 	})}
 }
 
@@ -71,7 +75,7 @@ func (s *ServerInfo) ConnectServer() error {
 
 	err = conn.Login(s.username, s.password)
 	if err != nil {
-		return err
+		return fmt.Errorf("login error:%v\n",err)
 	}
 	s.ServerConn = conn
 	s.Infof("connect to server  success")
@@ -82,7 +86,7 @@ func (s *ServerInfo) WalkAndBuild()error {
 	s.Info("Start download  from server")
 	walker:=s.Walk(s.ServerPath)
 	if err:=s.HandleWalker(walker);err!=nil{
-		return err
+		return fmt.Errorf("handle walker error:%v\n",err)
 	}
 	s.Info("success download from server!")
 	return s.ServerConn.Quit()
@@ -113,7 +117,7 @@ func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
 			if err!=nil{
 				return err
 			}
-			s.Infof("create file %s end,size 0\n",filePath)
+			s.Debugf("create file %s end,size 0\n",filePath)
 			return fs.Close()
 		}
 
@@ -125,7 +129,7 @@ func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
 			return err
 		}
 	default:
-		s.Errorf("this type %s is not supported,name:%s\n",t.String(),entry.Name)
+		s.Errorf("Type %s is not supported,name:%s\n",t.String(),entry.Name)
 	}
 
 	return nil

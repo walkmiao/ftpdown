@@ -1,10 +1,10 @@
 package utils
 
 import (
+	"backup/conf"
+	"backup/regex"
 	"errors"
 	"fmt"
-	"ftpHelper/conf"
-	"ftpHelper/regex"
 	"github.com/jlaffaye/ftp"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -14,7 +14,8 @@ import (
 )
 
 type ServerInfo struct {
-	Addr,TargetPath string
+	Addr string
+	TargetPath string //存储目标目录
 	PreviousDir string
 	FileCount int
 	*CommonInfo
@@ -97,12 +98,16 @@ func (s *ServerInfo) WalkAndBuild()error {
 func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
 	//s.Warningf("handle entry %s!\n",entry.Name)
 	switch t:=entry.Type;t {
-	//case ftp.EntryTypeFolder:
-	//	s.PreviousDir = path.Join(s.PreviousDir,entry.Name)
-	//	if err:=s.Mkdir(s.PreviousDir);err!=nil{
-	//		return err
-	//	}
-
+	//这个case还有待处理
+	case ftp.EntryTypeFolder:
+		p:=path.Join(s.TargetPath,curPath)
+		if err:=s.Mkdir(p);err!=nil{
+			return err
+		}
+		walker:=s.Walk(curPath)
+		if err:=s.HandleWalker(walker);err!=nil{
+			return err
+		}
 	case ftp.EntryTypeFile:
 		s.FileCount++
 		if s.IsFilter{
@@ -111,10 +116,9 @@ func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
 				break
 			}
 		}
-
+		filePath:=path.Join(s.TargetPath,entry.Name)
 		//当大小为0时 response close的时候有bug需要跳过
 		if entry.Size==0{
-			filePath:=path.Join(s.TargetPath,entry.Name)
 			fs,err:=os.OpenFile(filePath,os.O_CREATE|os.O_WRONLY,os.ModePerm)
 			if err!=nil{
 				return err
@@ -127,7 +131,7 @@ func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
 		if err!=nil{
 			return err
 		}
-		if err=s.WriteRespToFile(resp,path.Join(s.TargetPath,entry.Name));err!=nil{
+		if err=s.WriteRespToFile(resp,filePath);err!=nil{
 			return err
 		}
 	default:

@@ -14,7 +14,7 @@ Fetch:
   Timeout: 10
   ServerPath: /
   StorePath: /Users/lch/myftp
-  Regexp: .*(exe)$
+  Filters: ".so|CSMain|yklog"
   Factor: 2
 
 Account:

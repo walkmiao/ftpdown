@@ -46,14 +46,14 @@ func main() {
 
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		if err := HandleServerList(ctx, utils.DefaultCommonInfo.JDServer, "jd"); err != nil {
+		if err := HandleServerList(ctx, utils.DefaultFetchConfig.JDServer, "jd"); err != nil {
 			logrus.Errorf("handle server list jd error:%v\n", err)
 		}
 	}(wg)
 
 	go func(wg *sync.WaitGroup) {
 		defer wg.Done()
-		if err := HandleServerList(ctx, utils.DefaultCommonInfo.WGQServer, "wgq"); err != nil {
+		if err := HandleServerList(ctx, utils.DefaultFetchConfig.WGQServer, "wgq"); err != nil {
 			logrus.Errorf("handle server list wgq error:%v\n", err)
 		}
 	}(wg)
@@ -73,7 +73,7 @@ func HandleServerList(ctx context.Context, serverList []string, serverDir string
 
 	for _, addr := range serverList {
 		svrInfo := utils.NewServerInfo(addr, serverDir)
-		svrInfo.CommonInfo = utils.DefaultCommonInfo
+		svrInfo.FetchConf = utils.DefaultFetchConfig
 		svrInfo.TargetPath = path.Join(svrInfo.StorePath, serverDir, addr)
 		svrInfo.PreviousDir = svrInfo.TargetPath
 		svrInfo.Debugf("target store path:%s", svrInfo.TargetPath)

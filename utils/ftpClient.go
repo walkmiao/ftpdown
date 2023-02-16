@@ -14,28 +14,26 @@ import (
 )
 
 type ServerInfo struct {
-	Addr string
-	TargetPath string //存储目标目录
+	Addr        string
+	TargetPath  string //存储目标目录
 	PreviousDir string
-	FileCount int
-	*CommonInfo
+	FileCount   int
+	FetchConf
 	*ftp.ServerConn
 	*log.Entry
 }
 
-type CommonInfo struct {
+type FetchConf struct {
 	port                  string
 	username, password    string
 	ServerPath, StorePath string
-	Regexp                string
-	IsFilter			  bool
+	Filters               string
 	timeout               time.Duration
-	JDServer,WGQServer           []string
-
+	JDServer, WGQServer   []string
 }
 
 var (
-	DefaultCommonInfo = &CommonInfo{}
+	DefaultFetchConfig FetchConf
 )
 
 func init() {
@@ -44,26 +42,23 @@ func init() {
 		return
 	}
 
-	DefaultCommonInfo.port = viper.GetString("Server.Port")
-	DefaultCommonInfo.timeout = time.Second * time.Duration(viper.GetInt("Server.Timeout"))
-	DefaultCommonInfo.username,DefaultCommonInfo.password=viper.GetString("Account.UserName"),
+	DefaultFetchConfig.port = viper.GetString("Server.Port")
+	DefaultFetchConfig.timeout = time.Second * time.Duration(viper.GetInt("Server.Timeout"))
+	DefaultFetchConfig.username, DefaultFetchConfig.password = viper.GetString("Account.UserName"),
 		viper.GetString("Account.Password")
-	DefaultCommonInfo.JDServer,DefaultCommonInfo.WGQServer =
-		viper.GetStringSlice("Server.List.JD"),viper.GetStringSlice("Server.List.WGQ")
+	DefaultFetchConfig.JDServer, DefaultFetchConfig.WGQServer =
+		viper.GetStringSlice("Server.List.JD"), viper.GetStringSlice("Server.List.WGQ")
 
-	DefaultCommonInfo.ServerPath, DefaultCommonInfo.StorePath =
+	DefaultFetchConfig.ServerPath, DefaultFetchConfig.StorePath =
 		viper.GetString("Fetch.ServerPath"), viper.GetString("Fetch.StorePath")
-	DefaultCommonInfo.Regexp = viper.GetString("Fetch.Regexp")
-	DefaultCommonInfo.IsFilter = DefaultCommonInfo.Regexp!=""
+	DefaultFetchConfig.Filters = viper.GetString("Fetch.Filters")
 }
 
-func NewServerInfo(addr string,region string) *ServerInfo {
-	return &ServerInfo{Addr: addr,Entry:log.WithFields(log.Fields{
-		"server":addr,
-		"region":region,
-		"isFilterOpen":DefaultCommonInfo.IsFilter,
-		"regexp":DefaultCommonInfo.Regexp,
-
+func NewServerInfo(addr string, region string) *ServerInfo {
+	return &ServerInfo{Addr: addr, Entry: log.WithFields(log.Fields{
+		"server": addr,
+		"region": region,
+		"regexp": DefaultFetchConfig.Filters,
 	})}
 }
 
@@ -77,94 +72,93 @@ func (s *ServerInfo) ConnectServer() error {
 
 	err = conn.Login(s.username, s.password)
 	if err != nil {
-		return fmt.Errorf("login error:%v\n",err)
+		return fmt.Errorf("login error:%v\n", err)
 	}
 	s.ServerConn = conn
 	s.Infof("connect to server  success")
 	return nil
 }
 
-func (s *ServerInfo) WalkAndBuild()error {
+func (s *ServerInfo) WalkAndBuild() error {
 	s.Info("Start download  from server")
-	walker:=s.Walk(s.ServerPath)
-	if err:=s.HandleWalker(walker);err!=nil{
-		return fmt.Errorf("handle walker error:%v\n",err)
+	walker := s.Walk(s.ServerPath)
+	if err := s.HandleWalker(walker); err != nil {
+		return fmt.Errorf("handle walker error:%v\n", err)
 	}
-	s.Infof("success download from server! file count:%d\n",s.FileCount)
+	s.Infof("success download from server! file count:%d\n", s.FileCount)
 	return s.ServerConn.Quit()
 }
 
-
-func (s *ServerInfo)HandleEntry(entry *ftp.Entry,curPath string)error{
+func (s *ServerInfo) HandleEntry(entry *ftp.Entry, curPath string) error {
 	//s.Warningf("handle entry %s!\n",entry.Name)
-	switch t:=entry.Type;t {
+	switch t := entry.Type; t {
 	//这个case还有待处理
 	case ftp.EntryTypeFolder:
-		p:=path.Join(s.TargetPath,curPath)
-		if err:=s.Mkdir(p);err!=nil{
+		willMkdir := path.Join(s.TargetPath, curPath)
+		if err := os.MkdirAll(willMkdir, os.ModePerm); err != nil {
 			return err
 		}
-		walker:=s.Walk(curPath)
-		if err:=s.HandleWalker(walker);err!=nil{
+		walker := s.Walk(curPath)
+		if err := s.HandleWalker(walker); err != nil {
 			return err
 		}
 	case ftp.EntryTypeFile:
 		s.FileCount++
-		if s.IsFilter{
-			if regex.Filter(s.CommonInfo.Regexp,entry.Name){
-				s.Warningf("file %s has been filtered!",entry.Name)
-				break
-			}
+		if regex.FilterString(s.FetchConf.Filters, entry.Name) {
+			s.Warningf("file %s has been filtered!", entry.Name)
+			break
 		}
-		filePath:=path.Join(s.TargetPath,entry.Name)
+		filePath := path.Join(s.TargetPath, curPath)
 		//当大小为0时 response close的时候有bug需要跳过
-		if entry.Size==0{
-			fs,err:=os.OpenFile(filePath,os.O_CREATE|os.O_WRONLY,os.ModePerm)
-			if err!=nil{
+		if entry.Size == 0 {
+			fs, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+			if err != nil {
 				return err
 			}
-			s.Debugf("create file %s end,size 0\n",filePath)
+			s.Debugf("create file %s end,size 0\n", filePath)
 			return fs.Close()
 		}
 
-		resp,err:=s.Retr(curPath)
-		if err!=nil{
+		resp, err := s.Retr(curPath)
+		if err != nil {
 			return err
 		}
-		if err=s.WriteRespToFile(resp,filePath);err!=nil{
+		if err = s.WriteRespToFile(resp, filePath); err != nil {
 			return err
 		}
+		fmt.Printf("下载文件%s success\n", entry.Name)
 	default:
-		s.Errorf("Type %s is not supported,name:%s\n",t.String(),entry.Name)
+		s.Errorf("Type %s is not supported,name:%s\n", t.String(), entry.Name)
 	}
 
 	return nil
 }
 
-func(s *ServerInfo)HandleWalker(walker *ftp.Walker)error{
-		if walker==nil{
-			return errors.New("walker is nil")
-		}
-		s.Info("start walk path from server")
-		if err:=s.Mkdir(s.TargetPath);err!=nil{
+func (s *ServerInfo) HandleWalker(walker *ftp.Walker) error {
+	if walker == nil {
+		return errors.New("walker is nil")
+	}
+	s.Info("start walk path from server")
+	if err := s.Mkdir(s.TargetPath); err != nil {
+		return err
+	}
+	for walker.Next() {
+		entry := walker.Stat()
+		//if strings.Contains(entry.Name, "test11") {
+		//	fmt.Println(entry.Name)
+		//}
+		curPath := walker.Path()
+		err := s.HandleEntry(entry, curPath)
+		if err != nil {
 			return err
 		}
-		for walker.Next(){
-			entry:=walker.Stat()
-			curPath:=walker.Path()
-			err:=s.HandleEntry(entry,curPath)
-			if err!=nil{
-				return err
-			}
-		}
-		return nil
+	}
+	return nil
 }
 
-func (s *ServerInfo) Work()error {
+func (s *ServerInfo) Work() error {
 	if err := s.ConnectServer(); err != nil {
 		return fmt.Errorf("connect to server error:%v\n", err)
 	}
 	return s.WalkAndBuild()
 }
-
-

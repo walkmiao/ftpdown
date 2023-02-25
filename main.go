@@ -2,98 +2,102 @@ package main
 
 import (
 	"backup/conf"
+	"backup/logic"
+	"backup/models"
 	"backup/utils"
 	"context"
 	"fmt"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"golang.org/x/sync/semaphore"
-	"log"
 	"os"
 	"os/exec"
-	"path"
+	"os/signal"
 	"runtime"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
 )
 
 var (
 	cpus       = runtime.GOMAXPROCS(0)
-	maxWorkers = 8
+	maxWorkers = cpus
 	wg         = &sync.WaitGroup{}
+)
+var (
+	Version string
+	Build   string
 )
 
 func main() {
-	log.Println("process start")
-	start := time.Now()
+	logrus.Printf("version:%s build:%s\n", Version, Build)
 	if err := conf.InitConfig(""); err != nil {
-		log.Printf("init config error:%v\n", err)
-		return
+		logrus.Fatalf("init config error:%v\n", err)
 	}
-
-	num := viper.GetInt("Fetch.Factor")
+	num := conf.GlobalCfg.Fetch.Factor
 	if num != 0 {
 		maxWorkers = cpus * num
 	} else {
 		maxWorkers = cpus * 2
 	}
-	timeout := viper.GetInt("Fetch.Timeout")
-	ctx, _ := context.WithTimeout(context.Background(),
-		time.Second*time.Duration(timeout))
-	log.Printf("cpu:%d factor:%d maxWorkers(cpu*factor):%d\n", cpus, num, maxWorkers)
-	log.Printf("timeout is set to %d s!\n", timeout)
-	wg.Add(2)
-
-	go func(wg *sync.WaitGroup) {
-		defer wg.Done()
-		if err := HandleServerList(ctx, utils.DefaultFetchConfig.JDServer, "jd"); err != nil {
-			logrus.Errorf("handle server list jd error:%v\n", err)
+	interval := time.Hour * time.Duration(conf.GlobalCfg.Fetch.Interval)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	//立即备份然后再定时
+	backUp(wg, logic.Mock{})
+	go func() {
+		logrus.Infof("开启定时任务,间隔:%v", interval)
+		for {
+			select {
+			case <-ticker.C:
+				//backUp(wg, &logic.MysqlQuery{MysqlConf: conf.GlobalCfg.Mysql.Jd}, &logic.MysqlQuery{MysqlConf: conf.GlobalCfg.Mysql.Wgq})
+				backUp(wg, logic.Mock{})
+			}
 		}
-	}(wg)
-
-	go func(wg *sync.WaitGroup) {
-		defer wg.Done()
-		if err := HandleServerList(ctx, utils.DefaultFetchConfig.WGQServer, "wgq"); err != nil {
-			logrus.Errorf("handle server list wgq error:%v\n", err)
-		}
-	}(wg)
-	wg.Wait()
-	logrus.Info(" All work done!")
-	log.Printf("process completed! cost:%f s", time.Now().Sub(start).Seconds())
-	pause()
+	}()
+	sig := <-sigChan
+	logrus.Infof("监听到信号%s，已结束运行", sig.String())
 }
 
-func HandleServerList(ctx context.Context, serverList []string, serverDir string) (err error) {
-	//设置为cpu的核数*2
-	if len(serverList) <= 0 {
-		return fmt.Errorf("%s server list is empty!\n", serverDir)
-	}
-
+func HandleServerList(ctx context.Context, serverList []*models.Collector, park string) (err error) {
+	total := len(serverList)
+	var notTry int32 = 0
 	sema := semaphore.NewWeighted(int64(maxWorkers))
-
-	for _, addr := range serverList {
-		svrInfo := utils.NewServerInfo(addr, serverDir)
-		svrInfo.FetchConf = utils.DefaultFetchConfig
-		svrInfo.TargetPath = path.Join(svrInfo.StorePath, serverDir, addr)
-		svrInfo.PreviousDir = svrInfo.TargetPath
-		svrInfo.Debugf("target store path:%s", svrInfo.TargetPath)
-		if err := sema.Acquire(ctx, 1); err != nil {
-			svrInfo.Errorf("accquire resource error:%v\n", err)
+	var num atomic.Int32
+	for _, server := range serverList {
+		v, ok := utils.ErrMap.Load(server.Addr)
+		if ok {
+			//如果已经被禁或者尝试的时间没到,则跳过下载
+			if inv := v.(*utils.Invalid); inv.Forbidden || time.Now().Sub(inv.RetryTime()) < 0 {
+				notTry++
+				continue
+			}
+		}
+		svrInfo := utils.NewServerInfo(server, park)
+		if err = sema.Acquire(context.Background(), 1); err != nil {
+			svrInfo.Errorf("semaphore accquire resource error:%v", err)
 			break
 		}
+		server := server
 		go func() {
-			if err := svrInfo.Work(); err != nil {
-				svrInfo.Errorf("download from server error:%v\n", err)
+			defer sema.Release(1)
+			if err = svrInfo.Work(); err != nil {
+				svrInfo.Errorf("备份KC521B【%s(%s)】出错:%v", server.EquipName, server.Addr, err)
+				return
 			}
-			sema.Release(1)
-			svrInfo.Warningf("%s released!\n", svrInfo.Addr)
+			num.Add(1)
 		}()
 	}
 
-	if err := sema.Acquire(ctx, int64(maxWorkers)); err != nil {
-		return fmt.Errorf("%s work  do  failed:%v\n", serverDir, err)
+	if err = sema.Acquire(context.Background(), int64(maxWorkers)); err != nil {
+		return fmt.Errorf("semaphore accquire failed:%v", err)
 	}
-	logrus.Infof("[DONE] %s  work done!\n", serverDir)
+	success := num.Load()
+	logrus.Infof("%s KC521B共【%d】台,成功:%d 台 失败:%d 台 跳过:%d 台!",
+		park, total, success, int32(total)-success-notTry, notTry)
 	return nil
 }
 
@@ -102,4 +106,42 @@ func pause() {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Run()
+}
+
+func backUp(wg *sync.WaitGroup, queries ...logic.QueryCollector) {
+	wg.Add(len(queries))
+	errCh := make(chan error, len(queries))
+	for _, query := range queries {
+		q := query
+		go func(errCh chan error) {
+			defer wg.Done()
+			cs, err := q.GetCollector()
+			if err != nil {
+				errCh <- fmt.Errorf("从%s获取数据信息错误:%v", q.GetTag(), err)
+				return
+			}
+			errCh <- backgroundWork(cs, q.GetTag())
+		}(errCh)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			logrus.Errorf("备份任务出错:%v", err)
+		}
+	}
+}
+
+func backgroundWork(cs []*models.Collector, park string) error {
+	ctx, cancel := context.WithTimeout(context.Background(),
+		time.Second*time.Duration(conf.GlobalCfg.Fetch.Timeout))
+	defer cancel()
+	err := HandleServerList(ctx, cs, park)
+	if err != nil {
+		if err = utils.SendEmail("KC521B备份错误", fmt.Sprintf("备份%s错误:%v", park, err)); err != nil {
+			logrus.Errorf("send email error:%v", err)
+		}
+		return err
+	}
+	return nil
 }

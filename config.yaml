@@ -1,24 +1,44 @@
-Logger:
-  Level: DEBUG
-  FileName:
+logger:
+  level: DEBUG
+  fileName: backup.log
 
-Server:
-  Port: 62222
-  Timeout: 2
-  List:
-    JD:
-      - 192.168.43.150
-    WGQ:
-      - 192.168.43.2
-Fetch:
-  Timeout: 10
-  ServerPath: /
-  StorePath: /Users/lch/myftp
-  Filters: ".so|CSMain|yklog"
-  Factor: 2
+server:
+  port: 62222
+  timeout: 2
+mysql:
+  jd:
+    addr: jd:3306
+    user: root
+    password: 123456
+    db: jd
+    tag: jd
+  wgq:
+    addr: wgq:3308
+    user: root
+    password: 123456
+    db: wgq
+    tag: wgq
+fetch:
+  timeout: 10
+  serverPath: /
+  storePath: ./myftp
+  filters: ".so|CSMain|yklog"
+  factor: 2
+  interval: 1 #hours
+  retain: 5 #保留zip数量
 
-Account:
-  UserName: demo
-  Password: demo
+retry:
+  retryInterval: 8 #hours
+  thresholdFactor: 0.25 #错误递增因子
+  maxFailed: 10 #最大尝试次数
 
+email:
+    endpoint:
+    receivers:
+      - 001250120@mails.icbc
+accounts:
+  - userName: root
+    password: root
+  - userName: root
+    password: Sbbdlyx123
 

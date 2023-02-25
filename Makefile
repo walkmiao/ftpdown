@@ -1,28 +1,27 @@
-GOBUILD = go build -ldflags="-w -s"
-WIN_TARGET64 = fetch64.exe
-WIN_TARGET32 = fetch32.exe
-TARGET = fetch
+BUILD_ENV := CGO_ENABLED=0
+BUILD=`date +%FT%T%z`
+VERSION = "v0.0.1"
+LDFLAGS=-ldflags "-w -s -X main.Version=${VERSION} -X main.Build=${BUILD}"
 
-build : build-windows32
+TARGET_EXEC := backup
 
-build-self : main.go config.yaml
-	$(GOBUILD)  -o $(TARGET)  main.go
+.PHONY: all clean setup build-linux build-osx build-windows
 
-build-linux : main.go config.yaml
-	GOOS=linux GOARCH=amd64 GO111MODULE=on $(GOBUILD)  -o $(TARGET)  main.go
+all: clean setup build-linux build-osx build-windows
 
-build-windows64 : main.go config.yaml
-	GOOS=windows GOARCH=amd64  GO111MODULE=on $(GOBUILD)  -o $(WIN_TARGET64)  main.go
+clean:
+	rm -rf dist/
 
-build-windows32 : main.go config.yaml
-	GOOS=windows GOARCH=386  GO111MODULE=on $(GOBUILD)  -o $(WIN_TARGET32)  main.go
+setup:
+	mkdir -p dist/linux
+	mkdir -p dist/osx
+	mkdir -p dist/windows
 
-clean : cleanlog cleanprogram
+build-linux: setup
+	${BUILD_ENV} GOARCH=amd64 GOOS=linux go build ${LDFLAGS} -o dist/linux/${TARGET_EXEC}
 
-cleanlog :
-	rm -f *.log
+build-osx: setup
+	${BUILD_ENV} GOARCH=amd64 GOOS=darwin go build ${LDFLAGS} -o dist/osx/${TARGET_EXEC}\
 
-cleanprogram :
-	rm -f ${WIN_TARGET64} ${WIN_TARGET32} ${TARGET}
-
-.PHONY : clean
+build-windows: setup
+	${BUILD_ENV} GOARCH=amd64 GOOS=windows go build ${LDFLAGS} -o dist/windows/${TARGET_EXEC}.exe

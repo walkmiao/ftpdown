@@ -1,9 +1,10 @@
 package regex
 
 import (
-	log "github.com/sirupsen/logrus"
 	"regexp"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func Filter(expr string, file string) bool {
@@ -16,6 +17,9 @@ func Filter(expr string, file string) bool {
 }
 
 func FilterString(expr string, file string) bool {
+	if expr == "" {
+		return false
+	}
 	checks := strings.Split(expr, "|")
 	for _, check := range checks {
 		if strings.Contains(file, check) {

@@ -2,90 +2,133 @@ package utils
 
 import (
 	"backup/conf"
+	"backup/models"
 	"backup/regex"
 	"errors"
 	"fmt"
-	"github.com/jlaffaye/ftp"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"os"
 	"path"
+	"path/filepath"
+	"sync"
 	"time"
+
+	"github.com/jlaffaye/ftp"
+	log "github.com/sirupsen/logrus"
 )
 
+const (
+	LATEST = "最新下载"
+)
+
+var ErrMap sync.Map
+
+type Invalid struct {
+	ErrCount      int64
+	RetryInterval time.Duration
+	Forbidden     bool
+}
+
+func (inv Invalid) RetryTime() time.Time {
+	return time.Now().Add(inv.RetryInterval)
+}
+
 type ServerInfo struct {
-	Addr        string
-	TargetPath  string //存储目标目录
-	PreviousDir string
-	FileCount   int
-	FetchConf
+	Addr string
+	Park string
+	Name string
+	*FetchConf
 	*ftp.ServerConn
 	*log.Entry
 }
 
+func (info *ServerInfo) ZipName() string {
+	zipName := fmt.Sprintf("%s(%s)-%s.zip",
+		info.Name, info.Addr, time.Now().Format("2006-01-02 15:04:05"))
+	return path.Join(filepath.Dir(info.TargetPath()), zipName)
+}
+
+// 存储目录
+func (info *ServerInfo) TargetPath() string {
+	return path.Join(conf.GlobalCfg.Fetch.StorePath, info.Park,
+		fmt.Sprintf("%s(%s)", info.Name, info.Addr), LATEST)
+}
+
 type FetchConf struct {
-	port                  string
-	username, password    string
 	ServerPath, StorePath string
 	Filters               string
-	timeout               time.Duration
-	JDServer, WGQServer   []string
+	Timeout               time.Duration
 }
 
-var (
-	DefaultFetchConfig FetchConf
-)
+var DefaultFetchConfig *FetchConf
 
-func init() {
-	if err := conf.InitConfig(""); err != nil {
-		log.Errorf("init config error:%v\n", err)
-		return
+func NewServerInfo(server *models.Collector, park string) *ServerInfo {
+	if DefaultFetchConfig == nil {
+		DefaultFetchConfig = &FetchConf{
+			ServerPath: conf.GlobalCfg.Fetch.ServerPath,
+			StorePath:  conf.GlobalCfg.Fetch.StorePath,
+			Filters:    conf.GlobalCfg.Fetch.Filters,
+			Timeout:    time.Duration(conf.GlobalCfg.Fetch.Timeout),
+		}
 	}
-
-	DefaultFetchConfig.port = viper.GetString("Server.Port")
-	DefaultFetchConfig.timeout = time.Second * time.Duration(viper.GetInt("Server.Timeout"))
-	DefaultFetchConfig.username, DefaultFetchConfig.password = viper.GetString("Account.UserName"),
-		viper.GetString("Account.Password")
-	DefaultFetchConfig.JDServer, DefaultFetchConfig.WGQServer =
-		viper.GetStringSlice("Server.List.JD"), viper.GetStringSlice("Server.List.WGQ")
-
-	DefaultFetchConfig.ServerPath, DefaultFetchConfig.StorePath =
-		viper.GetString("Fetch.ServerPath"), viper.GetString("Fetch.StorePath")
-	DefaultFetchConfig.Filters = viper.GetString("Fetch.Filters")
-}
-
-func NewServerInfo(addr string, region string) *ServerInfo {
-	return &ServerInfo{Addr: addr, Entry: log.WithFields(log.Fields{
-		"server": addr,
-		"region": region,
-		"regexp": DefaultFetchConfig.Filters,
-	})}
+	return &ServerInfo{
+		Addr:      server.Addr,
+		Name:      server.EquipName,
+		FetchConf: DefaultFetchConfig,
+		Park:      park,
+		Entry: log.WithFields(log.Fields{
+			"server": server.Addr,
+			"name":   server.EquipName,
+			"park":   park,
+		})}
 }
 
 func (s *ServerInfo) ConnectServer() error {
-	conn, err := ftp.Dial(fmt.Sprintf("%s:%s", s.Addr, s.port),
-		ftp.DialWithTimeout(s.timeout))
-
-	if err != nil {
+	conn, err := ftp.Dial(s.Addr,
+		ftp.DialWithTimeout(s.Timeout*time.Second))
+	if err == nil {
+		ErrMap.Delete(s.Addr)
+	} else {
+		v, loaded := ErrMap.LoadOrStore(s.Addr, &Invalid{
+			ErrCount:      1,
+			RetryInterval: time.Hour * time.Duration(conf.GlobalCfg.Retry.RetryInterval),
+		})
+		//出错后，8小时内不允许下载
+		if loaded {
+			inv := v.(*Invalid)
+			if cnt := conf.GlobalCfg.Retry.MaxFailed; inv.ErrCount >= cnt {
+				inv.Forbidden = true
+				s.Debugf("(%s)%s 已经超过最大尝试上限 %d次,已不再下载", s.Name, s.Addr, cnt)
+				return nil
+			}
+			inv.ErrCount += 1
+			inv.RetryInterval = time.Duration(float64(inv.RetryInterval) * (1 + conf.GlobalCfg.Retry.ThresholdFactor))
+		}
 		return err
 	}
 
-	err = conn.Login(s.username, s.password)
-	if err != nil {
-		return fmt.Errorf("login error:%v\n", err)
+	var errLogin error
+	for _, account := range conf.GlobalCfg.Accounts {
+		if errLogin = conn.Login(account.UserName, account.Password); err != nil {
+			continue
+		}
+		break
+	}
+	if errLogin != nil {
+		return errLogin
 	}
 	s.ServerConn = conn
-	s.Infof("connect to server  success")
+	s.Debugf("connect to server %s  success", s.Addr)
 	return nil
 }
 
 func (s *ServerInfo) WalkAndBuild() error {
-	s.Info("Start download  from server")
 	walker := s.Walk(s.ServerPath)
 	if err := s.HandleWalker(walker); err != nil {
 		return fmt.Errorf("handle walker error:%v\n", err)
 	}
-	s.Infof("success download from server! file count:%d\n", s.FileCount)
+	if err := ZipFile(s.ZipName(), s.TargetPath()); err != nil {
+		return fmt.Errorf("zip file error:%v", err)
+	}
 	return s.ServerConn.Quit()
 }
 
@@ -94,7 +137,7 @@ func (s *ServerInfo) HandleEntry(entry *ftp.Entry, curPath string) error {
 	switch t := entry.Type; t {
 	//这个case还有待处理
 	case ftp.EntryTypeFolder:
-		willMkdir := path.Join(s.TargetPath, curPath)
+		willMkdir := path.Join(s.TargetPath(), curPath)
 		if err := os.MkdirAll(willMkdir, os.ModePerm); err != nil {
 			return err
 		}
@@ -103,19 +146,17 @@ func (s *ServerInfo) HandleEntry(entry *ftp.Entry, curPath string) error {
 			return err
 		}
 	case ftp.EntryTypeFile:
-		s.FileCount++
 		if regex.FilterString(s.FetchConf.Filters, entry.Name) {
 			s.Warningf("file %s has been filtered!", entry.Name)
 			break
 		}
-		filePath := path.Join(s.TargetPath, curPath)
+		filePath := path.Join(s.TargetPath(), curPath)
 		//当大小为0时 response close的时候有bug需要跳过
 		if entry.Size == 0 {
 			fs, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
 			if err != nil {
 				return err
 			}
-			s.Debugf("create file %s end,size 0\n", filePath)
 			return fs.Close()
 		}
 
@@ -126,9 +167,6 @@ func (s *ServerInfo) HandleEntry(entry *ftp.Entry, curPath string) error {
 		if err = s.WriteRespToFile(resp, filePath); err != nil {
 			return err
 		}
-		fmt.Printf("下载文件%s success\n", entry.Name)
-	default:
-		s.Errorf("Type %s is not supported,name:%s\n", t.String(), entry.Name)
 	}
 
 	return nil
@@ -138,15 +176,11 @@ func (s *ServerInfo) HandleWalker(walker *ftp.Walker) error {
 	if walker == nil {
 		return errors.New("walker is nil")
 	}
-	s.Info("start walk path from server")
-	if err := s.Mkdir(s.TargetPath); err != nil {
+	if err := os.MkdirAll(s.TargetPath(), os.ModePerm); err != nil {
 		return err
 	}
 	for walker.Next() {
 		entry := walker.Stat()
-		//if strings.Contains(entry.Name, "test11") {
-		//	fmt.Println(entry.Name)
-		//}
 		curPath := walker.Path()
 		err := s.HandleEntry(entry, curPath)
 		if err != nil {
@@ -158,7 +192,7 @@ func (s *ServerInfo) HandleWalker(walker *ftp.Walker) error {
 
 func (s *ServerInfo) Work() error {
 	if err := s.ConnectServer(); err != nil {
-		return fmt.Errorf("connect to server error:%v\n", err)
+		return err
 	}
 	return s.WalkAndBuild()
 }

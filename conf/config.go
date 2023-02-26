@@ -21,7 +21,7 @@ type Config struct {
 type Cfg struct {
 	Logger   Logger
 	Server   Server
-	Mysql    Mysql
+	Mysql    []*MysqlConf
 	Fetch    Fetch
 	Retry    *Retry
 	Accounts []Account

@@ -6,18 +6,18 @@ server:
   port: 62222
   timeout: 2
 mysql:
-  jd:
+  -
     addr: jd:3306
     user: root
     password: 123456
-    db: jd
-    tag: jd
-  wgq:
+    db: wiseidci
+    tag: 嘉定园区
+  -
     addr: wgq:3308
     user: root
     password: 123456
-    db: wgq
-    tag: wgq
+    db: wiseidci
+    tag: 外高桥园区
 fetch:
   timeout: 10
   serverPath: /

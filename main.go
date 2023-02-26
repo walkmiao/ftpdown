@@ -46,15 +46,18 @@ func main() {
 	defer ticker.Stop()
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	var cs = make([]logic.QueryCollector, 0, len(conf.GlobalCfg.Mysql))
+	for _, cnf := range conf.GlobalCfg.Mysql {
+		cs = append(cs, &logic.MysqlQuery{MysqlConf: cnf})
+	}
 	//立即备份然后再定时
-	backUp(wg, logic.Mock{})
+	backUp(wg, cs...)
 	go func() {
 		logrus.Infof("开启定时任务,间隔:%v", interval)
 		for {
 			select {
 			case <-ticker.C:
-				//backUp(wg, &logic.MysqlQuery{MysqlConf: conf.GlobalCfg.Mysql.Jd}, &logic.MysqlQuery{MysqlConf: conf.GlobalCfg.Mysql.Wgq})
-				backUp(wg, logic.Mock{})
+				backUp(wg, cs...)
 			}
 		}
 	}()
